@@ -73,7 +73,7 @@ app.get('/auth/slack/callback',
 app.use('/slack/events', slackEvents.expressMiddleware());
 
 // // connect to the mongo db
-MongoClient.connect('mongodb://jaybird1905:Blake8485@ds147884.mlab.com:47884/quote-bot', (err, database) => {
+MongoClient.connect('mongodb://***:****@ds147884.mlab.com:47884/quote-bot', (err, database) => {
    if (err) return console.log(err)
    db = database
 //   // sit and wait for traffic
@@ -104,8 +104,6 @@ slackEvents.on('message', (message, body) => {
 slackEvents.on('reaction_added', (event, body) => {
   // Initialize a client
   const slack = getClientByTeamId(body.team_id);
-  console.log(body.team_id);
-  console.log(clients);
   // Handle initialization failure
   if (!slack) {
     return console.error('No authorization found for this team. Did you install this app again after restarting?');
@@ -115,7 +113,7 @@ slackEvents.on('reaction_added', (event, body) => {
 if(event.reaction.toString() === "quote"){
   // add a quote to the db
         console.log(event);
-        const text = slack.channels.history('xoxp-***', event.item.channel, 0,0,event.item.ts,event.item.ts,event.item.ts);
+        const text = slack.channels.history('xoxp-****', event.item.channel, 0,0,event.item.ts,event.item.ts,event.item.ts);
 
        db.collection('quotes').save(body, (err, result) => {
          if (err) return console.log(err)
