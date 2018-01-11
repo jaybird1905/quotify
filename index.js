@@ -73,7 +73,7 @@ app.get('/auth/slack/callback',
 app.use('/slack/events', slackEvents.expressMiddleware());
 
 // // connect to the mongo db
-MongoClient.connect('mongodb://***:****@ds147884.mlab.com:47884/quote-bot', (err, database) => {
+MongoClient.connect('mongodb://jxx@ds147884.mlab.com:47884/quote-bot', (err, database) => {
    if (err) return console.log(err)
    db = database
 //   // sit and wait for traffic
@@ -113,8 +113,10 @@ slackEvents.on('reaction_added', (event, body) => {
 if(event.reaction.toString() === "quote"){
   // add a quote to the db
         console.log(event);
-        const text = slack.channels.history('xoxp-****', event.item.channel, 0,0,event.item.ts,event.item.ts,event.item.ts);
-
+      //  const text = slack.channels.history('xoxp-116671274262-115995602434-269796553874-361f608fb12edb885115a6a1d84620da', event.item.channel, 0,0,event.item.ts,event.item.ts,event.item.ts);
+      slack.channels.history({channel:event.item.channel, latest: event.item.ts, inclusive:true}).then(result => {
+                console.log(result)
+              })
        db.collection('quotes').save(body, (err, result) => {
          if (err) return console.log(err)
          console.log('saved to database');
