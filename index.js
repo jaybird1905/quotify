@@ -1,6 +1,6 @@
 // Load environment variables from `.env` file (optional)
 require('dotenv').config();
-
+const async = require ('async');
 const slackEventsApi = require('@slack/events-api');
 const SlackClient = require('@slack/client').WebClient;
 const passport = require('passport');
@@ -8,9 +8,92 @@ const SlackStrategy = require('@aoberoi/passport-slack').default.Strategy;
 const http = require('http');
 const express = require('express');
 const bodyParser = require('body-parser');
+const math = require('math');
 //add mongo
 const MongoClient = require('mongodb').MongoClient
-var db
+var db;
+
+// Automatically reconnect after an error response from Slack.
+var autoReconnect = true;
+
+// Put your bot API token here
+var token = "xoxp-116671274262-115995602434-297838647253-c12adc5dc6dcfdb0c13ebff93c6d9c20";
+
+// Put your slack team name here
+// We'll use this when piecing together our API call
+var team = "lgoflegends";
+
+// Track bot user, for detecting the bot's own messages
+var bot;
+
+// The type of conversation we're dealing with
+var family;
+
+// We'll define our own custom API call to get channel history
+// See the note for step 10 above
+var XMLHttpRequest = require("xmlhttprequest").XMLHttpRequest;
+
+var ephemeralQuoteFail =
+{
+  "response_type": "ephemeral",
+  "replace_original": false,
+  "text": "That user doesn't have any saved quotes. Add some!"
+}
+
+var ephemeralQuoteSaved =
+{
+  "response_type": "ephemeral",
+  "replace_original": false,
+  "text": "Quote saved!"
+}
+
+var getUsername = function() {
+  this.get = function(value, callback) {
+  var xhr = new XMLHttpRequest();
+  // This builds the actual structure of the API call using our provided variables
+  var url = "https://" + team + ".slack.com/api/" + "users.info?token=" + token + "&user=" + value;
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState == 4 && xhr.status == 200)
+      callback(xhr.responseText);
+    }
+    xhr.open("GET", url, true);
+    xhr.send();
+  }
+}
+
+
+var getChannelHistory = function() {
+  this.get = function(family, value, callback) {
+  var xhr = new XMLHttpRequest();
+  // This builds the actual structure of the API call using our provided variables
+  var url = "https://" + team + ".slack.com/api/" + family + ".history?token=" + token + "&channel=" + value;
+  //console.log(url);
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState == 4 && xhr.status == 200)
+      callback(xhr.responseText);
+    }
+    xhr.open("GET", url, true);
+    xhr.send();
+  }
+}
+
+var getConversationInfo = function() {
+  this.get = function(value, callback) {
+  var xhr = new XMLHttpRequest();
+  // This builds the actual structure of the API call using our provided variables
+  var url = "https://" + team + ".slack.com/api/conversations.info" + "?token=" + token + "&channel=" + value;
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState == 4 && xhr.status == 200)
+      callback(xhr.responseText);
+    }
+    xhr.open("GET", url, true);
+    xhr.send();
+  }
+}
+
+function getRandomInt(max) {
+  return Math.floor(Math.random() * Math.floor(max));
+}
 
 // *** Initialize event adapter using verification token from environment variables ***
 const slackEvents = slackEventsApi.createSlackEventAdapter(process.env.SLACK_VERIFICATION_TOKEN, {
@@ -25,6 +108,12 @@ const botAuthorizations = {}
 // could fail but there might be a suitable client from one of the other teams that is within that
 // shared channel.
 const clients = {};
+
+// This should work in node.js and other ES5 compliant implementations.
+function isEmptyObject(obj) {
+  return !Object.keys(obj).length;
+}
+
 function getClientByTeamId(teamId) {
   if (!clients[teamId] && botAuthorizations[teamId]) {
     clients[teamId] = new SlackClient(botAuthorizations[teamId]);
@@ -51,6 +140,13 @@ app.use(bodyParser.json());
 // add body-parser as a helper for express to digest the incoming json
 app.use(bodyParser.urlencoded({extended: true}))
 
+// // connect to the mongo db
+MongoClient.connect('mongodb://jaybird1905:Blake8485@ds147884.mlab.com:47884/quote-bot', (err, database) => {
+   if (err) return console.log(err)
+   db = database
+});
+
+
 // Plug the Add to Slack (OAuth) helpers into the express app
 app.use(passport.initialize());
 app.get('/', (req, res) => {
@@ -69,41 +165,104 @@ app.get('/auth/slack/callback',
   }
 );
 
-// *** Plug the event adapter into the express app as middleware ***
-app.use('/slack/events', slackEvents.expressMiddleware());
+app.post('/slack/commands', (req, res) => {
 
-// // connect to the mongo db
-MongoClient.connect('mongodb://jxx@ds147884.mlab.com:47884/quote-bot', (err, database) => {
-   if (err) return console.log(err)
-   db = database
-//   // sit and wait for traffic
-//   app.listen(3000, () => {
-//     console.log('LiStEnInG oN pOrT: 3000')
-//   })
-});
 
-// *** Greeting any user that says "hi" ***
-slackEvents.on('message', (message, body) => {
-  // Only deal with messages that have no subtype (plain messages) and contain 'hi'
-  if (!message.subtype && message.text.indexOf('Mirror mirror, on the wall -- who is the gayest Mexican of them all?') >= 0) {
+  var reqBody = req.body;
+  var responseURL = reqBody.response_url;
+
+  res.status(200); // best practice to respond with empty 200 status code
+
+  // the user's realname
+  var name = "";
+  // get the tagged user's user id
+  var taggeduser = req.body.text.substr(2, 9);
+  // create an async series to order the priority of the function calls
+  async.series([
+
+  function(callback) {
+    // create a new history object and create the string we need to send out to make our request
+    username = new getUsername();
+
+    username.get(taggeduser, function(response) {
+      // Now that we have our messages,
+      // let's parse them to make them readable
+      json = JSON.parse(response);
+      if(!json.user.hasOwnProperty('real_name'))
+      {
+        return res.status(200).json(ephemeralQuoteFail);
+      }
+      name = json.user.real_name;
+      callback();
+    });
+  },
+  function(callback) {
     // Initialize a client
-    const slack = getClientByTeamId(body.team_id);
-    // Handle initialization failure
+
+    const slack = getClientByTeamId(req.body.team_id);
+
     if (!slack) {
       return console.error('No authorization found for this team. Did you install this app again after restarting?');
     }
-    // Respond to the message back in the same channel
-    slack.users.info(message.user)
-    //console.log(slack.users.list());
-    slack.chat.postMessage(message.channel, '@tripz of course! :nail_care::skin-tone-3:')
-      .catch(console.error);
-  }
-});
 
-// *** Responding to reactions with the same emoji ***
+    //create or grab the collection of quotes for this user
+    var collection = db.createCollection(taggeduser);
+    console.log(collection);
+
+    // get a random document back from the user's quote collection
+    result = [];
+    db.collection(taggeduser).aggregate({ $sample: { size: 1 }}, function(err, result) {
+           if (err) throw err;
+
+           //check for an empty quotes object
+         if(!isEmptyObject(result)){
+           console.log(result);
+           res.status(200);
+            //  res.status(200);
+            // put together the random quote message and post it to the channel
+            var message = "\"" + result[0].messages[0].text + "\" - " + name;
+            slack.chat.postMessage(req.body.channel_id, message);
+            res.status(200);
+            callback();
+         }
+         else {
+           //return slack.chat.postMessage(req.body.channel_id, `This user doesn't have any saved quotes. Add some!`);
+              res.status(200).json(ephemeralQuoteFail); // best practice to respond with empty 200 status code
+              callback();
+             }
+          });
+       }],
+  function(err) { //This function gets called after the two tasks have called their "task callbacks"
+          if (err) return next(err);
+          //Here locals will be populated with `user` and `posts`
+          //Just like in the previous example
+      }
+    );
+
+  });
+
+// *** Plug the event adapter into the express app as middleware ***
+app.use('/slack/events', slackEvents.expressMiddleware());
+
+//  *** Responding to reactions with the same emoji ***
 slackEvents.on('reaction_added', (event, body) => {
+
+
+    // var collections = db.listCollections();
+    //
+    //   for(var i=0;i<collections.length;i++)
+    //   {
+    //     console.log(body.message.ts);
+    //     db.collections[i].aggregate([{ $match: body.message.ts },{ $group: { _id: null, count: { $sum: 1 } } }], function(err,result){
+    //          if (err) throw err;
+    //          console.log(result);
+    //   });
+    //   }
+
   // Initialize a client
-  const slack = getClientByTeamId(body.team_id);
+  []
+const slack = new SlackClient(token);
+
   // Handle initialization failure
   if (!slack) {
     return console.error('No authorization found for this team. Did you install this app again after restarting?');
@@ -111,39 +270,84 @@ slackEvents.on('reaction_added', (event, body) => {
   // Respond to the reaction back with the same emoji
 //  slack.chat.postMessage(event.item.channel, `:${event.reaction}:`)
 if(event.reaction.toString() === "quote"){
-  // add a quote to the db
-        console.log(event);
-      // //  const text = slack.channels.history('xoxp-116671274262-115995602434-269796553874-361f608fb12edb885115a6a1d84620da', event.item.channel, 0,0,event.item.ts,event.item.ts,event.item.ts);
-      // slack.channels.history({channel:event.item.channel, latest: event.item.ts, inclusive:true}).then(result => {
-      //           console.log(result)
-      //         })
-      //  db.collection('quotes').save(body, (err, result) => {
-      //    if (err) return console.log(err)
-      //    console.log('saved to database');
-      //  })
 
-  slack.channels.history({
-  token:'xx',
-  channel: event.item.channel,
-  latest: event.item.ts,
-  oldest: event.item.ts,
-  count: 1,
-  inclusive: true
-})
-  .then(result => {
-    console.log(result);
-    db.collection('quotes').save(result.messages[0], (err, data) => {
-      if (err) return console.log(err);
-      console.log('saved to database');
-      console.log(data);
-    })
-  })
-  .catch(err => console.log(err));
-  slack.chat.postMessage(event.item.channel, "Fuck you Check, Doug, and Lynx!")
-      .catch(console.error);
-}
+  invokingUser = "";
+  // create an async series to order the priority of the function calls
+  async.series([
 
-});
+  function(callback){
+    // create a new history object and create the string we need to send out to make our request
+    username = new getUsername();
+
+    username.get(event.user, function(response) {
+      // Now that we have our messages,
+      // let's parse them to make them readable
+      json = JSON.parse(response);
+      invokingUser = json.user.real_name;
+      callback();
+    });
+  },
+
+  function(callback) {
+
+    convoInfo = new getConversationInfo();
+    convoInfo.get(event.item.channel, function(response) {
+              // Now that we have our messages,
+              // let's parse them to make them readable
+                  json = JSON.parse(response);
+                  // grab the channel type from the response
+                  // isChannel = json.channel.is_channel;
+                  if(!json.channel.is_channel){
+                    family = "groups";
+                  }
+                  else {
+                    family = "channels";
+                  }
+                   callback();
+              });
+          },
+        function(callback) {
+
+          // if(event.item.ts === db.ts)
+          //   {
+          //     console.log('Event already exists!');
+          //   }
+          // create a new history object and create the string we need to send out to make our request
+          history = new getChannelHistory();
+          fullstring = event.item.channel + "&latest=" + event.item.ts + "&inclusive=true&count=1";
+
+          history.get(family,fullstring, function(response) {
+            // Now that we have our messages,
+            // let's parse them to make them readable
+            json = JSON.parse(response);
+            json.team_id = {};
+            json.team_id = body.team_id;
+            JSON.stringify(json);
+            // make sure we got back good json
+            if(json.ok){
+              //Make sure the user is a human and not a bot
+              if(!json.messages[0].hasOwnProperty('bot_id')){
+              var user = String(json.messages[0].user);
+            //  console.log("Type is:" + typeof user + " -- " + user);
+            // create a collection using the user's id, unless it already exists
+            var collection = db.createCollection(user);
+              // insert the message into the collection
+                 db.collection(user).save(json, (err, data) => {
+                   if (err) return console.log(err);
+                   //slack.chat.postMessage(event.item.channel, "Quote saved by " + invokingUser);
+                   console.log('saved to database');
+                   slack.chat.postEphemeral(event.item.channel, `Quote Saved! :quote:`, event.user);
+                 })
+              }
+          }else{console.log("Error:" + json.error)}
+           callback();
+          });
+        }],
+        function(err) { //This function gets called after the two tasks have called their "task callbacks"
+            if (err) return next(err);
+        });
+      }
+    });
 
 // *** Handle errors ***
 slackEvents.on('error', (error) => {
