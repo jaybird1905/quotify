@@ -17,7 +17,8 @@ var db;
 var autoReconnect = true;
 
 // Put your bot API token here
-var token = "xoxp-116671274262-115995602434-297838647253-c12adc5dc6dcfdb0c13ebff93c6d9c20";
+// TODO: FIX THIS!!
+var token = token;
 
 // Put your slack team name here
 // We'll use this when piecing together our API call
@@ -140,8 +141,9 @@ app.use(bodyParser.json());
 // add body-parser as a helper for express to digest the incoming json
 app.use(bodyParser.urlencoded({extended: true}))
 
-// // connect to the mongo db
-MongoClient.connect('mongodb://jaybird1905:Blake8485@ds147884.mlab.com:47884/quote-bot', (err, database) => {
+//
+// TODO: fix this!
+MongoClient.connect(mongo, (err, database) => {
    if (err) return console.log(err)
    db = database
 });
